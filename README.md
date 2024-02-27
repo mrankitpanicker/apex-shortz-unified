@@ -12,3 +12,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Fix: reduced model loading time for Apex Shortz
 
+Refactor: implemented Redis-backed task queuing
+
