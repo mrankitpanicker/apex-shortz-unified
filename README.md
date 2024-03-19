@@ -36,3 +36,5 @@ Logic: improved error handling for local-first CRM
 
 Setup: finalized Docker-compose for distributed workers
 
+Setup: finalized Docker-compose for distributed workers
+
