@@ -48,3 +48,5 @@ Fix OOM: optimized VRAM allocation for Whisper
 
 Update: tuned quantization levels for local inference
 
+Logic: improved error handling for local-first CRM
+
