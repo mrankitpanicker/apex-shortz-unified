@@ -72,3 +72,5 @@ Setup: finalized Docker-compose for distributed workers
 
 Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
+Tweak: adjusted worker concurrency to avoid CPU bottleneck
+
