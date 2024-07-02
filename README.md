@@ -102,3 +102,5 @@ Patch: resolved memory leak in video rendering loop
 
 Refactor: implemented Redis-backed task queuing
 
+Update: tuned quantization levels for local inference
+
