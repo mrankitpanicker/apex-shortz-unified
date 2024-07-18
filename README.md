@@ -120,3 +120,5 @@ Patch: resolved memory leak in video rendering loop
 
 Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
+Fix: reduced model loading time for Apex Shortz
+
