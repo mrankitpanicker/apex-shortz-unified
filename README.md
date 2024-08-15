@@ -150,3 +150,5 @@ Refactor: implemented Redis-backed task queuing
 
 Setup: finalized Docker-compose for distributed workers
 
+Fix OOM: optimized VRAM allocation for Whisper
+
