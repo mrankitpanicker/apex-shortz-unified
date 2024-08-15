@@ -146,3 +146,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
+Refactor: implemented Redis-backed task queuing
+
