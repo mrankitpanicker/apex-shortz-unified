@@ -164,3 +164,5 @@ Setup: finalized Docker-compose for distributed workers
 
 Update: tuned quantization levels for local inference
 
+Tweak: adjusted worker concurrency to avoid CPU bottleneck
+
