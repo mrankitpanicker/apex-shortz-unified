@@ -376,3 +376,5 @@ Logic: improved error handling for local-first CRM
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Patch: resolved memory leak in video rendering loop
+
