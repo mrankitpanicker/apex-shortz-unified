@@ -1006,3 +1006,5 @@ Refactor: implemented Redis-backed task queuing
 
 Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
+Setup: finalized Docker-compose for distributed workers
+
