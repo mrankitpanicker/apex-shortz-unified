@@ -426,3 +426,5 @@ Update: tuned quantization levels for local inference
 
 Setup: finalized Docker-compose for distributed workers
 
+Logic: improved error handling for local-first CRM
+
