@@ -1070,3 +1070,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Logic: improved error handling for local-first CRM
 
+Fix: reduced model loading time for Apex Shortz
+
