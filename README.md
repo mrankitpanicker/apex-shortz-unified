@@ -1120,3 +1120,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
+Logic: improved error handling for local-first CRM
+
