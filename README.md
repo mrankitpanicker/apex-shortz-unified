@@ -436,3 +436,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Refactor: implemented Redis-backed task queuing
 
+Update: tuned quantization levels for local inference
+
