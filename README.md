@@ -1148,3 +1148,5 @@ Logic: improved error handling for local-first CRM
 
 Patch: resolved memory leak in video rendering loop
 
+Fix: reduced model loading time for Apex Shortz
+
