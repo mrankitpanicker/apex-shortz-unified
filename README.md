@@ -446,3 +446,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Patch: resolved memory leak in video rendering loop
 
+Update: tuned quantization levels for local inference
+
