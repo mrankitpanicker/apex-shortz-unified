@@ -1390,3 +1390,5 @@ Logic: improved error handling for local-first CRM
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Tweak: adjusted worker concurrency to avoid CPU bottleneck
+
