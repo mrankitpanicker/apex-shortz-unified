@@ -462,3 +462,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Setup: finalized Docker-compose for distributed workers
 
+Logic: improved error handling for local-first CRM
+
