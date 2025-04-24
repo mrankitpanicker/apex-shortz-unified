@@ -1660,3 +1660,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Patch: resolved memory leak in video rendering loop
 
+Refactor: implemented Redis-backed task queuing
+
