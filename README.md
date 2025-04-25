@@ -1664,3 +1664,5 @@ Refactor: implemented Redis-backed task queuing
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Logic: improved error handling for local-first CRM
+
