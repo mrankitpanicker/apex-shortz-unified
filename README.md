@@ -1706,3 +1706,5 @@ Patch: resolved memory leak in video rendering loop
 
 Fix: reduced model loading time for Apex Shortz
 
+Fix: reduced model loading time for Apex Shortz
+
