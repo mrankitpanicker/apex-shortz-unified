@@ -618,3 +618,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Refactor: implemented Redis-backed task queuing
 
+Patch: resolved memory leak in video rendering loop
+
