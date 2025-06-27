@@ -644,3 +644,5 @@ Update: tuned quantization levels for local inference
 
 Fix: reduced model loading time for Apex Shortz
 
+Setup: finalized Docker-compose for distributed workers
+
