@@ -688,3 +688,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Refactor: implemented Redis-backed task queuing
+
