@@ -1756,3 +1756,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Setup: finalized Docker-compose for distributed workers
 
+Fix OOM: optimized VRAM allocation for Whisper
+
