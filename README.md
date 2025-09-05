@@ -1832,3 +1832,5 @@ Fix OOM: optimized VRAM allocation for Whisper
 
 Setup: finalized Docker-compose for distributed workers
 
+Tweak: adjusted worker concurrency to avoid CPU bottleneck
+
