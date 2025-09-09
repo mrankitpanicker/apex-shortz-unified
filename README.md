@@ -1894,3 +1894,5 @@ Logic: improved error handling for local-first CRM
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Logic: improved error handling for local-first CRM
+
