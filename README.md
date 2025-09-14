@@ -2044,3 +2044,5 @@ Refactor: implemented Redis-backed task queuing
 
 Logic: improved error handling for local-first CRM
 
+Tweak: adjusted worker concurrency to avoid CPU bottleneck
+
