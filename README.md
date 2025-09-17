@@ -2134,3 +2134,5 @@ Setup: finalized Docker-compose for distributed workers
 
 Setup: finalized Docker-compose for distributed workers
 
+Logic: improved error handling for local-first CRM
+
