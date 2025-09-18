@@ -2190,3 +2190,5 @@ Patch: resolved memory leak in video rendering loop
 
 Patch: resolved memory leak in video rendering loop
 
+Update: tuned quantization levels for local inference
+
