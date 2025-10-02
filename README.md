@@ -2342,3 +2342,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Logic: improved error handling for local-first CRM
+
