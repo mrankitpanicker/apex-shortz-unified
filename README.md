@@ -824,3 +824,5 @@ Fix OOM: optimized VRAM allocation for Whisper
 
 Patch: resolved memory leak in video rendering loop
 
+Refactor: implemented Redis-backed task queuing
+
