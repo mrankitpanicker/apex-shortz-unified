@@ -2396,3 +2396,5 @@ Refactor: implemented Redis-backed task queuing
 
 Logic: improved error handling for local-first CRM
 
+Update: tuned quantization levels for local inference
+
