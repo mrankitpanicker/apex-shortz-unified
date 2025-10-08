@@ -2398,3 +2398,5 @@ Logic: improved error handling for local-first CRM
 
 Update: tuned quantization levels for local inference
 
+Setup: finalized Docker-compose for distributed workers
+
