@@ -2402,3 +2402,5 @@ Setup: finalized Docker-compose for distributed workers
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Logic: improved error handling for local-first CRM
+
