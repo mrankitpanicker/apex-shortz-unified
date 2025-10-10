@@ -2448,3 +2448,5 @@ Fix OOM: optimized VRAM allocation for Whisper
 
 Setup: finalized Docker-compose for distributed workers
 
+Patch: resolved memory leak in video rendering loop
+
