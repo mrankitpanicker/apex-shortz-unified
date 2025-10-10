@@ -2470,3 +2470,5 @@ Update: tuned quantization levels for local inference
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Refactor: implemented Redis-backed task queuing
+
