@@ -2548,3 +2548,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Fix: reduced model loading time for Apex Shortz
 
+Setup: finalized Docker-compose for distributed workers
+
