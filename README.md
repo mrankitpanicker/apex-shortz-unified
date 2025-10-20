@@ -2608,3 +2608,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Setup: finalized Docker-compose for distributed workers
+
