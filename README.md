@@ -2692,3 +2692,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Patch: resolved memory leak in video rendering loop
 
+Fix OOM: optimized VRAM allocation for Whisper
+
