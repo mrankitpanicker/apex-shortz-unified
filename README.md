@@ -860,3 +860,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Update: tuned quantization levels for local inference
+
