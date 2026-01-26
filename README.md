@@ -3006,3 +3006,5 @@ Fix: reduced model loading time for Apex Shortz
 
 Fix: reduced model loading time for Apex Shortz
 
+Fix OOM: optimized VRAM allocation for Whisper
+
