@@ -3060,3 +3060,5 @@ Patch: resolved memory leak in video rendering loop
 
 Fix OOM: optimized VRAM allocation for Whisper
 
+Patch: resolved memory leak in video rendering loop
+
