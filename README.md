@@ -3272,3 +3272,5 @@ Tweak: adjusted worker concurrency to avoid CPU bottleneck
 
 Update: tuned quantization levels for local inference
 
+Logic: improved error handling for local-first CRM
+
