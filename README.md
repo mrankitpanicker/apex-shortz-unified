@@ -3286,3 +3286,5 @@ Fix OOM: optimized VRAM allocation for Whisper
 
 Setup: finalized Docker-compose for distributed workers
 
+Update: tuned quantization levels for local inference
+
