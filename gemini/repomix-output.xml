@@ -1,0 +1,648 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+__init__.py
+audio_gen.py
+config.py
+image_gen.py
+main.py
+text_gen.py
+utils.py
+video_gen.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="__init__.py">
+# src/__init__.py
+# This file can remain empty. 
+# It tells Python that 'src' is a package.
+</file>
+
+<file path="audio_gen.py">
+# src/audio_gen.py
+import os
+import torch
+from .config import Config
+
+
+class AudioGenerator:
+    def __init__(self):
+        # PyTorch Safety Fix for XTTS
+        try:
+            from TTS.api import TTS
+            from TTS.tts.configs.xtts_config import XttsConfig
+            from TTS.tts.models.xtts import XttsAudioConfig
+            from TTS.tts.models.xtts import XttsArgs
+            from TTS.config.shared_configs import BaseDatasetConfig
+
+            torch.serialization.add_safe_globals(
+                [XttsConfig, XttsAudioConfig, XttsArgs, BaseDatasetConfig]
+            )
+
+            self.TTS_Class = TTS
+            # Decide device once
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.gpu = self.device == "cuda"
+            print(f"🧠 AudioGenerator using device: {self.device}")
+
+        except ImportError:
+            print("❌ TTS Library missing. Install with: pip install \"TTS[all]\"")
+            self.TTS_Class = None
+            self.device = "cpu"
+            self.gpu = False
+
+        # Lazy-loaded XTTS model instance
+        self.tts_instance = None
+
+    # --------------------------------------------------------
+    # LOAD TTS MODEL ONCE (IMPORTANT)
+    # --------------------------------------------------------
+    def _load_tts(self):
+        if self.tts_instance is None:
+            if not self.TTS_Class:
+                print("❌ Cannot load XTTS: TTS_Class is not available.")
+                return
+
+            print(f"🎛️ Loading XTTS v2 (gpu={self.gpu})...")
+            self.tts_instance = self.TTS_Class(
+                "tts_models/multilingual/multi-dataset/xtts_v2",
+                gpu=self.gpu,
+            )
+
+            # Some versions support .to("cuda"), some already handle gpu internally
+            if self.gpu:
+                try:
+                    self.tts_instance.to("cuda")
+                    print("⚡ XTTS moved to GPU.")
+                except Exception:
+                    print("⚠️ XTTS .to('cuda') not supported; relying on internal gpu handling.")
+
+    def generate(self, text: str):
+        if not self.TTS_Class:
+            return
+
+        print("🔊 Generating Audio (XTTS)...")
+
+        ref_audio = Config.FILES["REF_AUDIO"]
+        out_audio = Config.FILES["AUDIO_OUT"]
+
+        if not os.path.exists(ref_audio):
+            print(f"❌ Missing ref.wav at {ref_audio}")
+            return
+
+        # Ensure model is loaded
+        self._load_tts()
+        if self.tts_instance is None:
+            print("❌ XTTS instance could not be initialized.")
+            return
+
+        try:
+            self.tts_instance.tts_to_file(
+                text=text,
+                file_path=out_audio,
+                speaker_wav=ref_audio,
+                language="hi",
+            )
+            print(f"✅ Audio saved at: {out_audio}")
+        except Exception as e:
+            print(f"❌ XTTS Error: {e}")
+</file>
+
+<file path="config.py">
+# src/config.py
+import os
+
+class Config:
+    # --- PATHS ---
+    # Calculates the project root directory relative to this file
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    INPUT_DIR = os.path.join(BASE_DIR, "input")
+    OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+    
+    FILES = {
+        "PROMPT": os.path.join(INPUT_DIR, "image_prompt.txt"),
+        "RIDDLE": os.path.join(INPUT_DIR, "puzzle_text.txt"),
+        "REF_AUDIO": os.path.join(INPUT_DIR, "ref.wav"),
+        "AUDIO_OUT": os.path.join(OUTPUT_DIR, "riddle_narration_xtts.wav"),
+        "IMAGE_CLEAN": os.path.join(OUTPUT_DIR, "clean_bg.png"),
+        "SUBTITLES": os.path.join(OUTPUT_DIR, "riddle.ass"),
+        "VIDEO_FINAL": os.path.join(OUTPUT_DIR, "final_short.mp4"),
+    }
+
+    # --- API KEYS ---
+    # 🛑 PASTE YOUR GEMINI KEY HERE
+    GEMINI_API_KEY = "AIzaSyDTJKbSfrrhICwanij43NlgpegjP5Fmt9o"
+    GEMINI_MODEL = "gemini-2.5-flash"
+
+    # --- VIDEO STYLE ---
+    FONT_NAME = "Noto Sans"
+    HEADER_SIZE = 30
+    BODY_SIZE = 20
+    
+    # ASS Colors (&HAABBGGRR)
+    COLOR_RED = "&H000000FF"
+    COLOR_WHITE = "&H00FFFFFF"
+
+    # --- IMAGE PROMPTS ---
+    # Keep this generic so the AI's realistic prompt takes over
+    SD_PROMPT_SUFFIX = "8k resolution, photorealistic, cinematic lighting, highly detailed, vertical portrait"
+    
+    SD_NEGATIVE_PROMPT = "cartoon, anime, drawing, sketch, text, watermark, blurry, low quality"
+</file>
+
+<file path="image_gen.py">
+import os
+import logging
+import warnings
+
+# 1. IMMEDIATE SILENCE (Must be at the very top)
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+
+# 2. Silence loggers before they are even used
+from huggingface_hub.utils import disable_progress_bars
+disable_progress_bars()
+
+# Now we can safely import the rest
+import torch
+from huggingface_hub import logging as hf_logging
+from transformers import logging as transformers_logging
+from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
+from .config import Config
+
+# Set verbosity levels to ERROR only
+transformers_logging.set_verbosity_error()
+hf_logging.set_verbosity_error()
+logging.getLogger("diffusers").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+class ImageGenerator:
+    def __init__(self):
+        print("🚀 Initializing Stable Diffusion (Realistic Fast)...")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # We'll use this print to confirm the startup
+        print(f"🧠 ImageGenerator using device: {self.device} (RTX 3050)")
+        self.pipe = self._load_pipeline()
+
+    def _load_pipeline(self):
+        try:
+            model_id = "runwayml/stable-diffusion-v1-5"
+            dtype = torch.float16 if self.device == "cuda" else torch.float32
+
+            pipe = StableDiffusionPipeline.from_pretrained(
+                model_id,
+                torch_dtype=dtype,
+                use_safetensors=True,
+                safety_checker=None,
+                requires_safety_checker=False,
+                low_cpu_mem_usage=True, 
+            )
+
+            # Silence the final generation bar
+            pipe.set_progress_bar_config(disable=True)
+            pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
+
+            if self.device == "cuda":
+                # RTX 3050 Optimal: Model Offload is faster than Sequential
+                pipe.enable_model_cpu_offload() 
+                pipe.vae.enable_tiling()
+                pipe.enable_attention_slicing()
+                print("⚡ GPU Performance Mode: Active.")
+            
+            return pipe
+
+        except Exception as e:
+            print(f"❌ SD Loading Error: {e}")
+            return None
+
+    def generate(self, prompt, seed=None):
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+
+        if not self.pipe:
+            return None
+
+        print("🎨 Drawing Realistic Image (Vertical)...")
+
+        clean_prompt = prompt[:100]
+        final_prompt = f"{clean_prompt}, {Config.SD_PROMPT_SUFFIX}"
+
+        generator = torch.Generator(device=self.device)
+        if seed is not None:
+            generator.manual_seed(seed)
+
+        try:
+            result = self.pipe(
+                prompt=final_prompt,
+                width=448,
+                height=800,
+                num_inference_steps=14,
+                guidance_scale=6.5,
+                negative_prompt=Config.SD_NEGATIVE_PROMPT,
+                generator=generator,
+            )
+            image = result.images[0]
+
+            image.save(Config.FILES["IMAGE_CLEAN"])
+            print(f"✅ Image Saved to {Config.FILES['IMAGE_CLEAN']}")
+            return Config.FILES["IMAGE_CLEAN"]
+
+        except Exception as e:
+            print(f"❌ Generation Error: {e}")
+            return None
+</file>
+
+<file path="main.py">
+# main.py
+import os
+import warnings
+import logging
+
+# --- SILENCE WARNINGS ---
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
+warnings.filterwarnings("ignore")
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("torchaudio").setLevel(logging.ERROR)
+
+from src.config import Config
+from src.utils import setup_directories, load_text, get_audio_duration
+from src.text_gen import TextGenerator
+from src.audio_gen import AudioGenerator
+from src.image_gen import ImageGenerator
+from src.video_gen import VideoEditor
+
+def main():
+    print("===================================")
+    print("🎬 AI SHORTS GENERATOR (Modular)")
+    print("===================================")
+    
+    setup_directories()
+
+    # --- 1. Text Phase ---
+    text_engine = TextGenerator()
+    # Check if we already have text to skip regeneration (Optional)
+    if os.path.exists(Config.FILES["RIDDLE"]):
+        print("📂 Loading existing riddle...")
+        riddle = load_text(Config.FILES["RIDDLE"])
+        # We need prompt too
+        if os.path.exists(Config.FILES["PROMPT"]):
+            prompt = load_text(Config.FILES["PROMPT"])
+        else:
+            prompt = text_engine.generate_image_prompt(riddle)
+    else:
+        riddle = text_engine.generate_riddle()
+        prompt = text_engine.generate_image_prompt(riddle)
+
+    if not riddle or not prompt: return
+
+    # --- 2. Audio Phase ---
+    audio_engine = AudioGenerator()
+    audio_engine.generate(riddle)
+
+    # --- 3. Image Phase ---
+    img_engine = ImageGenerator()
+    img_engine.generate(prompt)
+
+    # --- 4. Video Phase ---
+    video_engine = VideoEditor()
+    duration = get_audio_duration(Config.FILES["AUDIO_OUT"])
+    video_engine.create_subtitles(riddle, duration)
+    video_engine.render()
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="text_gen.py">
+from google import genai
+from google.genai import types
+from .config import Config
+from .utils import save_text
+import re
+
+
+# IMPORTANT: You must implement this function in your .utils file
+def load_riddle_history(filepath):
+    """Loads a list of previously generated, cleaned riddles."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            # Reads all lines, strips whitespace, and removes the CTA for better comparison
+            history = [
+                line.strip().replace(" - उत्तर पता हो तो कमेंट करें", "")
+                for line in f if line.strip()
+            ]
+        # Return only a few (e.g., the last 10) to save context window space
+        return history[-10:] 
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        print(f"History load error: {e}")
+        return []
+
+
+
+class TextGenerator:
+    def __init__(self):
+        print("🧠 Initializing Gemini...")
+        self.client = genai.Client(api_key=Config.GEMINI_API_KEY)
+
+    def remove_answer_spoilers(self, text):
+        """Clean up text to ensure no answers or brackets remain."""
+        text = re.sub(r'\(.*?\)', '', text)
+        lines = text.split('\n')
+        clean_lines = []
+        for line in lines:
+            if "answer" in line.lower() or "उत्तर" in line.lower():
+                continue
+            clean_lines.append(line)
+        text = " ".join(clean_lines)
+
+        text = re.sub(r'[a-zA-Z]', '', text) 
+        bad_chars = [",", ".", "?", "!", ":", "(", ")", "\"", "'", "|", "।"] 
+        digits = list("0123456789०१२३४५६७८९")
+        
+        for c in bad_chars + digits:
+            text = text.replace(c, "")
+            
+        return " ".join(text.split())
+
+    def generate_riddle(self):
+        print("📝 Generating Short & Tricky Hindi Riddle...")
+
+
+        # ----------------------------------------------------
+        # NEW: Load previous riddles to avoid repetition
+        # ----------------------------------------------------
+        past_riddles = load_riddle_history(Config.FILES["RIDDLE"])
+        
+        if past_riddles:
+            # Create a strong constraint string from the history
+            history_constraint = "DO NOT generate any of the following riddles or ones that solve to the same answer: "
+            # Join the last 5-10 riddles for the model to reference
+            history_constraint += " | ".join(past_riddles)
+        else:
+            history_constraint = "Generate a completely new and unique riddle."
+        # ----------------------------------------------------
+
+
+        # Automatic Call-To-Action
+        cta_text = "उत्तर पता हो तो कमेंट करें"
+
+        sys_instruction = (
+            "You are a Hindi Riddle Generator. "
+            "OUTPUT LANGUAGE: HINDI (Devanagari Script) ONLY. "
+            "Length: VERY SHORT (Max 20-30 words). "
+            "Style: Male persona ('मैं'). "
+            "Tone: Witty and tricky. "
+            "Rule: Do NOT provide the answer."
+        )
+
+        prompt = (
+            "एक बहुत छोटी और पेचीदा पहेली हिन्दी में लिखिए। "
+            "यह 2 या 3 लाइनों से ज्यादा नहीं होनी चाहिए। "
+            "शब्द आसान हों, लेकिन लॉजिक थोड़ा घुमावदार हो। "
+            "वाक्यों के बीच में ' - ' (डैश) लगाएं। "
+            "(Write a very short, tricky riddle. Max 2 lines.)"
+        )
+
+        try:
+            response = self.client.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_instruction,
+                    temperature=0.7, 
+                ),
+            )
+
+            if response.text:
+                raw_text = response.text.strip()
+                clean_text = self.remove_answer_spoilers(raw_text)
+                
+                if "-" not in clean_text:
+                    words = clean_text.split()
+                    chunked = [" ".join(words[i:i+4]) for i in range(0, len(words), 4)]
+                    clean_text = " - ".join(chunked)
+
+                final_text = f"{clean_text} - {cta_text}"
+
+                save_text(Config.FILES["RIDDLE"], final_text)
+                print(f"✅ Riddle Saved: {final_text[:50]}...")
+                return final_text
+
+            return None
+
+        except Exception as e:
+            print(f"❌ Gemini Riddle Error: {e}")
+            return None
+
+    def generate_image_prompt(self, riddle_text):
+        print("🎨 Generating Realistic Image Prompt...")
+
+        # CHANGED: Instructions for REALISM and CINEMATIC Lighting
+        sys_instruction = (
+            "You are an expert AI Art Director. "
+            "Task: Generate visual keywords for a PHOTOREALISTIC, CINEMATIC image based on the riddle. "
+            "Style: Unreal Engine 5, 8k, Octane Render, Dramatic Lighting, Hyper-realistic. "
+            "Content: Close-up or Macro shot of the subject (or a hint to it). "
+            "Negative: No text, no watermark, no cartoons, no drawings."
+            "Format: Comma-separated list. Limit 12 keywords."
+        )
+
+        prompt = f"Riddle: '{riddle_text}'. Visual keywords for a realistic 8k image:"
+
+        try:
+            response = self.client.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_instruction,
+                    temperature=0.4, 
+                ),
+            )
+
+            if response.text:
+                img_prompt = response.text.strip().replace("\n", ", ")
+                
+                for marker in ["prompt:", "keywords:", "output:"]:
+                    if marker in img_prompt.lower():
+                        img_prompt = img_prompt.split(marker)[-1].strip()
+
+                img_prompt = img_prompt[:120].strip(" ,")
+
+                save_text(Config.FILES["PROMPT"], img_prompt)
+                print(f"✅ Image Prompt Saved: {img_prompt}")
+                return img_prompt
+
+            return None
+
+        except Exception as e:
+            print(f"❌ Gemini Prompt Error: {e}")
+            return None
+</file>
+
+<file path="utils.py">
+# src/utils.py
+import os
+import subprocess
+from .config import Config
+
+def setup_directories():
+    """Creates input/output folders if missing."""
+    os.makedirs(Config.INPUT_DIR, exist_ok=True)
+    os.makedirs(Config.OUTPUT_DIR, exist_ok=True)
+
+def load_text(path):
+    """Reads text from file."""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f: return f.read().strip()
+    return None
+
+def save_text(path, content):
+    """Saves text to file."""
+    with open(path, "w", encoding="utf-8") as f: f.write(content)
+
+def format_ass_time(seconds):
+    """Converts seconds to ASS timestamp (H:MM:SS.cs)."""
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    cs = int((s - int(s)) * 100)
+    return f"{int(h)}:{int(m):02}:{int(s):02}.{cs:02}"
+
+def get_audio_duration(path):
+    """Gets exact duration of the audio file using FFmpeg."""
+    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=True)
+        return float(result.stdout.strip())
+    except:
+        return 10.0 # Fallback
+</file>
+
+<file path="video_gen.py">
+# src/video_gen.py
+import subprocess
+import textwrap
+from .config import Config
+from .utils import format_ass_time
+
+class VideoEditor:
+    def create_subtitles(self, text, duration):
+        print("📝 Creating Animated Subtitles...")
+        
+        # Styles: Header(Top Red), Body(Middle White)
+        # Note: Header MarginV is 30 to push it slightly up
+        header_ass = f"""[Script Info]
+Title: Gemini Pro
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: None
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: HeaderStyle,{Config.FONT_NAME},{Config.HEADER_SIZE},{Config.COLOR_RED},&H00FFFFFF,&H00FFFFFF,&H80000000,1,0,0,0,100,100,0,0,1,4,0,8,10,10,30,1
+Style: BodyStyle,{Config.FONT_NAME},{Config.BODY_SIZE},{Config.COLOR_WHITE},&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,2,5,30,30,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,{format_ass_time(duration)},HeaderStyle,,0,0,0,,दिमाग लगाओ!
+"""
+        events = []
+        
+        # Stabilized Karaoke Logic
+        words = text.split()
+        time_per_word = (duration - 0.5) / len(words)
+        current_time = 0.0
+
+        for i in range(len(words)):
+            visible_words = words[:i+1]
+            raw_string = " ".join(visible_words)
+            
+            # ✅ FIX: Changed width to 26. 
+            # This makes lines longer, so the text block is shorter and fits on screen.
+            formatted_text = "\\N".join(textwrap.wrap(raw_string, width=26))
+            
+            start_t = current_time
+            end_t = current_time + time_per_word
+            if i == len(words) - 1: end_t = duration
+
+            events.append(f"Dialogue: 0,{format_ass_time(start_t)},{format_ass_time(end_t)},BodyStyle,,0,0,0,,{formatted_text}")
+            current_time += time_per_word
+
+        with open(Config.FILES["SUBTITLES"], "w", encoding="utf-8") as f:
+            f.write(header_ass + "\n".join(events))
+        
+        return Config.FILES["SUBTITLES"]
+
+    def render(self):
+        print("🎬 Rendering Final Video...")
+        image_path = Config.FILES["IMAGE_CLEAN"]
+        audio_path = Config.FILES["AUDIO_OUT"]
+        ass_path = Config.FILES["SUBTITLES"]
+        safe_ass = ass_path.replace("\\", "/").replace(":", "\\:")
+
+        # Filter: Zoom + Darken + Subtitles
+        filters = (
+            "zoompan=z='min(zoom+0.0015,1.5)':d=1500:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=512x912,"
+            "eq=brightness=-0.4,"
+            f"ass='{safe_ass}'"
+        )
+
+        cmd = [
+            'ffmpeg', '-y', '-loop', '1',
+            '-i', image_path, '-i', audio_path,
+            '-vf', filters,
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+            '-shortest', Config.FILES["VIDEO_FINAL"]
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            print(f"🎉 SUCCESS! Video saved: {Config.FILES['VIDEO_FINAL']}")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Render Failed. Code: {e.returncode}")
+</file>
+
+</files>

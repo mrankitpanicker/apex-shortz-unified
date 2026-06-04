@@ -1,0 +1,212 @@
+Shortz — On-Prem AI Media Automation Engine
+Portfolio Case Study
+1. Executive Summary (Non-Technical)
+Shortz is a fully offline desktop system that transforms written scripts into broadcast-ready short-form videos — complete with AI-cloned narration, word-level karaoke subtitles, and final MP4 rendering — with zero manual editing.
+
+Why it matters: Content creators producing daily YouTube Shorts or Instagram Reels face a brutal bottleneck: each polished short takes 2–4 hours of manual voice recording, subtitle timing, and video editing. Shortz collapses that entire pipeline into a single button press that finishes in under 5 minutes.
+
+Real-world value:
+
+Reduces per-video production time from ~120–240 minutes to under 5 minutes — a 25–50x speedup
+Enables 10+ unique, high-retention videos per day without human intervention
+Runs entirely on local hardware — zero cloud costs, zero API rate limits, zero data leaving the machine
+Delivers brand-consistent voice identity across hundreds of videos using voice cloning
+Currently in active daily production, with 80+ videos generated across a 3-month deployment
+2. Architecture Overview
+Processing Pipeline
+Input Text File (Hindi scripts)
+        │
+        ▼
+  Text Preprocessing
+  (Punctuation normalization, word-safe chunking)
+        │
+        ▼
+  Voice Synthesis (XTTS v2)
+  (Voice-cloned narration, per-chunk WAV generation)
+        │
+        ▼
+  Audio Concatenation (FFmpeg)
+  (Multi-chunk merge with inter-chunk timing)
+        │
+        ▼
+  Word-Level Timestamp Extraction
+  (OpenAI Whisper → fallback to duration-based alignment)
+        │
+        ▼
+  Karaoke Subtitle Engine
+  (ASS format with per-word highlight timing, fade effects)
+        │
+        ▼
+  Video Renderer (FFmpeg)
+  (1080×1920 vertical canvas + ASS overlay + AAC audio)
+        │
+        ▼
+  Final MP4 Short (YouTube/Instagram ready)
+Application Architecture
+┌─────────────────────────────────────────────────────┐
+│               main.pyw (Entry Point)                │
+│  ┌──────────────┐  ┌────────────────────────────┐   │
+│  │ MainController│  │ EngineWorker (QThread)     │   │
+│  │ (Orchestrator)│──│ • Imports Shortz module     │   │
+│  │ • Signal wiring│ │ • Runs main_generate()     │   │
+│  │ • State mgmt  │ │ • Stdout → GUI redirection │   │
+│  │ • Progress map│ │ • Progress milestone parse │   │
+│  └──────┬───────┘  └────────────┬───────────────┘   │
+│         │                       │                    │
+│         ▼                       ▼                    │
+│  ┌──────────────────────────────────────────────┐   │
+│  │           gui.py (PyQt6 Frontend)             │   │
+│  │  • FluentGlassCard (glassmorphism panels)     │   │
+│  │  • AnimatedWaveProgress (7-layer sine anim)   │   │
+│  │  • Neon-styled log viewer with auto-scroll    │   │
+│  │  • Voice engine selector + output browser     │   │
+│  └──────────────────────────────────────────────┘   │
+│                                                      │
+│  ┌──────────────────────────────────────────────┐   │
+│  │           Shortz.py (Core Engine)                                                                             │   │
+│  │  • XTTS v2 model loading (GPU-accelerated)    │   │
+│  │  • Text cleaning + word-safe chunk splitting  │   │
+│  │  • TTS synthesis + FFmpeg audio concatenation  │   │
+│  │  • Whisper transcription for word timestamps   │   │
+│  │  • ASS karaoke subtitle generation            │   │
+│  │  • FFmpeg vertical video rendering            │   │
+│  │  • Progress tracking + history journaling     │   │
+│  └──────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+         Packaged as standalone .exe (PyInstaller)
+         Bundled: FFmpeg, voice samples, TTS model
+Components (~1,600 LOC across 3 modules)
+Module	LOC	Responsibility
+Shortz.py	583	Core pipeline: text preprocessing, XTTS synthesis, Whisper alignment, ASS subtitle generation, FFmpeg video rendering, progress tracking, history journaling
+gui.py	680	PyQt6 frontend: glassmorphism card system, 7-layer animated wave progress bar, neon-styled system log, voice engine selector, session metrics panel
+main.pyw	356	Application controller: QThread-based engine worker, stdout redirection for real-time log capture, milestone-based progress mapping, completion signaling
+Key Technical Decisions
+XTTS v2 over cloud TTS APIs: Chose Coqui XTTS for on-device voice cloning — the same voice identity persists across hundreds of videos with zero per-request cost. Cloud alternatives (ElevenLabs, OpenAI TTS) would cost $0.015–$0.030 per 1K characters, scaling to hundreds of dollars monthly at production volume.
+
+Whisper for word-level timing over forced alignment: OpenAI Whisper provides word-level timestamps as a byproduct of transcription, eliminating the need for a separate forced-alignment tool (like Montreal Forced Aligner). The fallback system derives timestamps mathematically from chunk durations when Whisper output is unavailable.
+
+ASS subtitles over SRT: Advanced SubStation Alpha format supports per-word karaoke highlighting (\kf tags), fade effects, and precise font/color control — capabilities that SRT cannot express.
+
+QThread worker isolation: The TTS/Whisper/FFmpeg pipeline runs in a separate QThread to prevent the GPU-intensive inference from freezing the PyQt6 GUI. Stdout is redirected through a signal-based bridge so engine print statements appear in the GUI log in real time.
+
+PyInstaller single-file packaging: The entire stack — Python runtime, PyTorch, XTTS model, Whisper, FFmpeg binaries, voice samples — is bundled into a single 
+.exe
+ with smart path detection (sys._MEIPASS for bundled assets vs. script-relative paths for development).
+
+3. Engineering Challenges Solved
+AI Pipeline Integration
+Multi-model inference orchestration: Each video render requires loading and running two distinct AI models sequentially — XTTS v2 (speech synthesis, ~1.5B parameters) and Whisper Small (speech recognition, ~244M parameters) — while managing GPU memory across both. The system handles model loading gracefully with fallback paths when dependencies are missing.
+
+Word-count mismatch between synthesis and recognition: XTTS generates audio from Hindi text, but Whisper's transcription often produces a different word count than the original script. The alignment engine handles three cases: exact match, surplus (truncation), and deficit (proportional redistribution based on total duration).
+
+Chunk boundary management: XTTS has a practical input limit (~250 characters for stable output). The word-safe splitter ensures text is never cut mid-word, and the concatenation pipeline merges chunk WAVs with configurable inter-chunk timing (2.5s hold + 0.08s delay) to maintain natural speech rhythm.
+
+Subtitle Engineering
+Karaoke timing precision: Each word in the ASS subtitle file carries its own \kf duration tag in centiseconds, synchronized to Whisper's word-level timestamps. A configurable start delay (1s) and per-word inter-delay (3cs) prevent the visual highlight from racing ahead of the audio.
+
+Fade and blur choreography: Each subtitle chunk has dynamically calculated fade-in (20ms) and fade-out durations proportional to chunk length, plus consistent blur radius for visual polish — all generated programmatically, not manually configured.
+
+GUI & UX Engineering
+Real-time progress mapping: The engine worker parses stdout from the core pipeline and maps 8 distinct milestone keywords to a global progress scale (0–100%). Local progress bars within stages (e.g., "Synthesizing 45%") are scaled to their proportional global range (20–35%), preventing progress from jumping backward.
+
+Custom animated wave progress: A 7-layer sine-wave animation runs at 60 FPS, where each layer has randomized cycle frequency, phase offset, amplitude factor, speed, and vertical offset — creating an organic, non-repeating visual effect that responds to progress state.
+
+Glassmorphism card system: Custom-painted QWidget subclasses render translucent gradient fills with rounded corners and subtle borders using QPainter paths, achieving a modern glass-panel aesthetic within PyQt6's widget system.
+
+Packaging & Distribution
+Single-executable bundling: PyInstaller packages the entire dependency tree (PyTorch, TTS, Whisper, FFmpeg binaries, voice samples, GUI assets) into one 
+.exe
+. The spec file uses collect_all for TTS, torch, and trainer packages to capture all transitive data files and hidden imports. Path detection (sys.frozen / sys._MEIPASS) ensures both development and packaged modes work identically.
+
+Completion signaling: Post-render, the system writes a shortz.done file to a known location (C:/automation/done/), enabling integration with external automation schedulers for unattended daily production runs.
+
+4. My Role & Ownership
+This is a 100% solo project — architecture, AI pipeline, GUI design, packaging, and production operations.
+
+What I Designed
+The end-to-end media generation pipeline: text → voice synthesis → timestamp alignment → karaoke subtitles → final video render
+The local-first architecture philosophy: zero cloud dependencies, zero recurring costs, total data sovereignty
+The voice cloning strategy for brand-consistent identity across hundreds of videos
+The PyQt6 glassmorphism interface with real-time engine telemetry
+The PyInstaller packaging strategy for single-file distribution
+Problems I Solved
+Orchestrated two large AI models (XTTS v2 + Whisper) in a single pipeline with graceful GPU memory management
+Built a word-level subtitle timing system that handles mismatches between synthesis output and recognition output
+Designed a progress mapping system that translates 8 internal pipeline stages into a smooth global progress bar without backward jumps
+Solved PyInstaller bundling for a dependency tree that includes PyTorch, CUDA, TTS models, and FFmpeg binaries
+Decisions I Made
+Local XTTS over ElevenLabs/OpenAI TTS: Chose on-device voice cloning to eliminate recurring API costs and ensure the same voice identity persists without depending on third-party model availability
+Whisper over forced alignment tools: Leveraged Whisper's word-level timestamp feature as a dual-purpose tool (quality verification + timing data), avoiding a separate alignment dependency
+ASS over SRT/WebVTT: Chose a subtitle format that supports per-word karaoke effects, allowing the highlight to track individual words rather than showing entire lines
+QThread over subprocess: Ran the engine in-process (via import + function call) rather than as a subprocess, enabling zero-overhead stdout capture through signal-based redirection
+Trade-offs I Handled
+Quality vs. speed: XTTS v2 produces high-quality cloned speech but is slower than lighter TTS models. The 250-character chunk limit was tuned to balance synthesis stability against processing time.
+Whisper accuracy vs. pipeline simplicity: Whisper occasionally miscounts words in Hindi, requiring a fallback alignment system. The trade-off was accepted because Whisper eliminates the need for a separate forced-alignment tool.
+Single-file exe vs. update flexibility: Bundling everything into one .exe makes distribution simple but makes updates heavyweight. This was acceptable because the system is deployed on a single workstation, not distributed to many clients.
+5. Technical Highlights (LinkedIn Format)
+Architecture & Pipeline Design
+
+Designed an end-to-end AI media pipeline: Text Preprocessing → Voice Synthesis (XTTS v2) → Word-Level Alignment (Whisper) → Karaoke Subtitle Generation (ASS) → Vertical Video Rendering (FFmpeg)
+Orchestrated two large AI models (XTTS v2 + Whisper Small) in a single sequential pipeline with graceful fallback paths
+Built word-safe text chunking with configurable inter-chunk timing to maintain natural speech rhythm across segment boundaries
+Implemented milestone-based global progress mapping that scales local stage progress into smooth 0–100% tracking
+AI / ML Engineering
+
+On-device voice cloning using XTTS v2 for brand-consistent narration across 80+ production videos
+Word-level timestamp extraction via OpenAI Whisper with three-case alignment handling (exact match, surplus, deficit)
+GPU-accelerated inference with automatic CUDA detection and CPU fallback
+Zero cloud dependency: all AI inference runs locally — zero per-request cost, zero data leakage
+Frontend & UX
+
+Custom PyQt6 glassmorphism UI with translucent gradient cards, neon drop shadows, and custom QPainter rendering
+7-layer animated sine-wave progress visualization running at 60 FPS with randomized per-layer parameters
+Real-time engine log streaming via QThread stdout redirection with signal-based GUI bridge
+DPI-aware rendering with Windows High-DPI API integration
+Packaging & Operations
+
+Single-executable distribution via PyInstaller bundling PyTorch, XTTS, Whisper, FFmpeg, and voice samples
+Dual-mode path resolution (development vs. packaged) using sys.frozen / sys._MEIPASS detection
+Completion signaling for external scheduler integration, enabling fully unattended daily production runs
+Production-proven: 80+ videos generated over 3-month deployment (Dec 2025 – Feb 2026)
+Technologies
+
+Python, PyTorch, Coqui TTS (XTTS v2), OpenAI Whisper, FFmpeg, PyQt6, PyInstaller, CUDA
+6. Impact Framing
+System Design Skills
+This project demonstrates the ability to design a multi-stage AI pipeline where each component (synthesis, alignment, subtitle generation, video rendering) has clearly defined inputs and outputs. The fallback alignment system shows defensive design thinking — the pipeline doesn't fail when Whisper produces unexpected output; it degrades gracefully.
+
+Production Thinking
+This isn't a demo or a prototype. It has generated 80+ production videos over 3 months. The completion signaling system (shortz.done), the history journal, the progress-resume mechanism, and the error-handling paths throughout the pipeline all reflect a system designed to run unattended and recover from failures.
+
+Cost & Efficiency Engineering
+The local-first architecture decision eliminated recurring cloud API costs that would scale linearly with output volume. At production scale (300+ videos/month), cloud TTS alone would cost hundreds of dollars monthly. The marginal cost of each additional video on Shortz is effectively zero.
+
+AI Engineering Depth
+Running two distinct AI models (speech synthesis + speech recognition) in a coordinated pipeline, handling GPU memory across both, and building a robust word-alignment layer between their outputs demonstrates applied ML engineering — not just API consumption.
+
+Senior-Level Engineering Judgement
+The project demonstrates clear trade-off reasoning: local inference vs. cloud APIs, Whisper vs. dedicated forced alignment, ASS vs. SRT, in-process execution vs. subprocess isolation, single-exe vs. modular distribution. Each decision has a defensible rationale tied to the system's operational constraints. This is the hallmark of senior engineering — choosing the right tool, not the newest one.
+
+7. LinkedIn Post
+I built Shortz — an AI media automation engine that turns plain text into fully produced short-form videos, entirely offline.
+
+The problem: creating a single polished YouTube Short or Instagram Reel takes 2–4 hours of voice recording, subtitle timing, and video editing. At daily volume, that's unsustainable.
+
+Shortz does it in under 5 minutes: 🎙️ Voice-cloned narration using XTTS v2 — same brand voice across every video 📝 Word-level karaoke subtitles synced via OpenAI Whisper timestamps 🎥 Vertical MP4 rendering through FFmpeg with ASS subtitle overlay 🖥️ All processing on local hardware — zero cloud costs, zero API limits
+
+The technical stack runs two large AI models (XTTS v2 for synthesis, Whisper for alignment) in a single pipeline, with a PyQt6 frontend showing real-time progress through animated wave visualizations and live log streaming.
+
+Some design choices I'm proud of: → Local voice cloning over cloud TTS — zero marginal cost at any volume → Word-safe text chunking with inter-segment timing for natural speech flow → Three-case alignment handling when Whisper word counts don't match the script → Single-exe packaging via PyInstaller with bundled PyTorch, FFmpeg, and model weights
+
+80+ production videos generated over 3 months of daily use. The system integrates with external schedulers for fully unattended runs — press nothing, get a finished video.
+
+Solo project. Architecture, AI pipeline, UI, packaging — all mine.
+
+#AI #MediaAutomation #Python #MachineLearning #Engineering
+
+8. Resume Bullets
+Designed and built Shortz, an on-prem AI media automation engine (Python, PyTorch, FFmpeg) that generates narrated, subtitled vertical videos from text input in under 5 minutes — replacing a 2–4 hour manual editing workflow and producing 80+ production videos over 3 months of daily operation
+
+Engineered a multi-model AI pipeline orchestrating XTTS v2 (voice cloning) and OpenAI Whisper (word-level timestamps) with three-case alignment handling, word-safe text chunking, and ASS karaoke subtitle generation — achieving brand-consistent narration across hundreds of videos with zero cloud API dependency
+
+Built a polished PyQt6 desktop application with glassmorphism UI, 7-layer animated progress visualization, real-time engine log streaming via QThread signal bridging, and single-executable PyInstaller packaging bundling PyTorch, CUDA, FFmpeg, and AI model weights

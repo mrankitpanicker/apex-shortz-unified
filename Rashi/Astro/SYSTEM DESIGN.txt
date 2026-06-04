@@ -1,0 +1,197 @@
+Astro — Headless AI Video Production Pipeline
+Portfolio Case Study
+1. Executive Summary (Non-Technical)
+Astro is a fully automated, offline system that generates broadcast-ready daily horoscope (Rashifal) videos — complete with AI-cloned Hindi narration, word-synced karaoke subtitles, and professional video rendering — and publishes them to YouTube without any human interaction.
+
+Why it matters: Producing a daily video that covers all 12 zodiac signs — with scripted narration, timed subtitles, and polished rendering — typically requires hours of voice recording, manual subtitle timing, editing, and uploading. Astro eliminates the entire workflow. It runs on a schedule, generates the full video autonomously, and publishes it to a live YouTube channel.
+
+Real-world value:
+
+Replaces a multi-hour daily production workflow with a zero-touch automated pipeline
+Generates unique daily content across 12 zodiac signs using structured randomization, ensuring no two days produce identical scripts
+Runs entirely on local hardware — zero cloud costs, zero API rate limits, zero data exposure
+Operates as a scheduled unattended system via Windows Task Scheduler — no manual trigger required
+Currently in active daily production, generating content for a live YouTube channel
+2. Architecture Overview
+End-to-End Pipeline
+┌──────────────────────────────────────────────────────────┐
+│                    ASTRO PIPELINE                         │
+│                                                          │
+│  ┌────────────────┐                                      │
+│  │  Data Model     │ 6 categorized phrase pools           │
+│  │  (datamodel.py) │ (270+ Hindi text entries)            │
+│  └───────┬────────┘                                      │
+│          ▼                                               │
+│  ┌────────────────┐                                      │
+│  │  Text Generator │ Structured randomization per rashi   │
+│  │  (generator.py) │ Anti-repetition + pronunciation fix  │
+│  └───────┬────────┘                                      │
+│          ▼                                               │
+│  ┌────────────────┐                                      │
+│  │  TTS Engine     │ XTTS v2 voice-cloned synthesis       │
+│  │  (main.py)      │ Word-safe chunking → WAV per chunk   │
+│  └───────┬────────┘                                      │
+│          ▼                                               │
+│  ┌────────────────┐                                      │
+│  │  Audio Merge    │ FFmpeg concat + volume normalization  │
+│  │  (main.py)      │ dynaudnorm + 4x gain per rashi       │
+│  └───────┬────────┘                                      │
+│          ▼                                               │
+│  ┌────────────────────────────────────────────┐          │
+│  │  Video Pipeline (videopipeline.py)          │          │
+│  │  ┌──────────────┐  ┌───────────────────┐   │          │
+│  │  │ Whisper ASR   │→│ ASS Subtitle Gen   │   │          │
+│  │  │ Word-level    │  │ Karaoke timing     │   │          │
+│  │  │ timestamps    │  │ Fade + blur effects│   │          │
+│  │  └──────────────┘  └───────┬───────────┘   │          │
+│  │                            ▼               │          │
+│  │  ┌─────────────────────────────────────┐   │          │
+│  │  │ FFmpeg Renderer                      │   │          │
+│  │  │ Video + Audio + ASS overlay → MP4    │   │          │
+│  │  │ H.264 + AAC 192k @ 1920×1080        │   │          │
+│  │  └─────────────────────────────────────┘   │          │
+│  └────────────────────────────────────────────┘          │
+│          ▼                                               │
+│  ┌────────────────┐                                      │
+│  │  Final Merge    │ 12 rashi segments → single video     │
+│  │  (videopipeline) │ FFmpeg concat demuxer (lossless)    │
+│  └───────┬────────┘                                      │
+│          ▼                                               │
+│  ┌────────────────┐                                      │
+│  │  YouTube Upload │ OAuth2 resumable upload              │
+│  │  (upload.py)    │ Auto-generated metadata + tags       │
+│  └────────────────┘                                      │
+└──────────────────────────────────────────────────────────┘
+     Scheduled via Windows Task Scheduler (daily)
+     100% local execution — no cloud, no API keys for AI
+Module Breakdown (~900 LOC across 7 files)
+Module	LOC	Responsibility
+main.py	331	Pipeline orchestrator: device detection, history management, TTS synthesis loop, audio merging, video generation, YouTube upload, cleanup
+videopipeline.py	245	Video composition engine: Whisper transcription, ASS karaoke subtitle generation, FFmpeg rendering, 12-segment final merge
+datamodel.py	270	Content data model: 6 categorized Hindi phrase pools (270+ entries) for structured horoscope generation
+generator.py	74	Script generator: structured randomization across 6 categories with anti-repetition, logical connectors, pronunciation correction
+utils.py	134	Core utilities: Hindi number-to-word conversion, text chunking, WAV duration, ASS time formatting, FFmpeg wrapper
+upload.py	133	YouTube integration: OAuth2 credential management, resumable upload with progress tracking, auto-retry
+config.py	71	Central configuration: paths, model selection, subtitle styling (ASS parameters), rashi-to-video mapping
+Key Technical Decisions
+XTTS v2 for on-device voice cloning: Chose Coqui XTTS over cloud TTS APIs (ElevenLabs, Google Cloud TTS) to maintain a consistent voice identity across every video with zero per-request cost. At daily production volume, cloud TTS would add significant recurring cost with no quality advantage for this use case.
+
+Whisper for word-level timestamp extraction: OpenAI Whisper provides word-level timestamps as part of transcription, eliminating the need for a separate forced-alignment tool. This gives dual value: quality verification (the system can detect if TTS produced garbled output) and precise subtitle timing data.
+
+ASS subtitle format with karaoke tags: Chose Advanced SubStation Alpha over SRT/WebVTT because ASS supports per-word \kf karaoke highlighting with fade effects, border/shadow/blur control, and precise font sizing — producing a professional look that SRT cannot achieve.
+
+Structured randomization over LLM generation: The script generator uses categorized phrase pools with logical connectors rather than an LLM. This guarantees grammatically correct output, eliminates hallucination risk, ensures consistent tone, and requires zero inference cost for text generation.
+
+Lossless concat demuxer for final merge: Individual rashi segments are merged using FFmpeg's concat demuxer with -c copy, avoiding re-encoding 12 segments and saving significant processing time while maintaining quality.
+
+History journaling for content diversity: A JSON-based history system tracks which phrases were used on which dates, with a configurable retention window (10 days). This prevents the system from repeating the same horoscope text across consecutive days.
+
+3. Engineering Challenges Solved
+Multi-Model AI Pipeline Orchestration
+Sequential dual-model inference: Each of the 12 rashi segments requires loading and running XTTS v2 (speech synthesis) followed by Whisper (speech recognition for alignment). The pipeline manages GPU memory across both models, with automatic CUDA detection and CPU fallback.
+Chunk-boundary management for TTS stability: XTTS v2 produces unstable output beyond ~200 characters. The word-safe text splitter (
+split_text_safe
+) ensures text is never cut mid-word or mid-sentence, and the concatenation pipeline merges chunk WAVs with volume normalization (dynaudnorm) and gain boosting.
+Subtitle Timing Precision
+Word-count mismatch handling: XTTS synthesizes audio from Hindi text, but Whisper's transcription often produces a different word count than the original script. The alignment engine maps Whisper timestamps to the reference text using min(ref_words, timestamps), ensuring subtitles always display the authored script — not Whisper's imperfect transcription.
+Multi-layered timing offsets: The subtitle system manages four distinct timing parameters — a global sync offset (1.5s), a subtitle start delay (4.0s matching the audio delay), inter-chunk hold time (0.5s), and inter-chunk spacing (0.5s) — all coordinated to keep visual highlights synchronized with spoken audio.
+Karaoke-style word highlighting: Each subtitle word carries its own \kf duration in centiseconds derived from Whisper timestamps, with a per-word inter-delay (3cs) to prevent the highlight from racing ahead. Dynamic fade-in/fade-out durations scale proportionally to chunk length.
+Audio Engineering
+Volume normalization pipeline: Raw XTTS output varies in volume across chunks. FFmpeg's dynaudnorm filter with a 75-frame window normalizes loudness, and a 4x gain multiplier ensures the final audio is broadcast-ready without clipping.
+Audio-video sync with delayed injection: The rashi audio is injected with a configurable delay (4 seconds) using FFmpeg's adelay filter, creating a silent intro period that matches the video's visual opening before narration begins.
+Content Diversity Engine
+Six-category structured generation: Each rashi script is assembled from 6 independent phrase pools (positive status, negative warning, remedies, general status, auspicious colors, luck metrics) with logical connectors ("वहीं," / "हालांकि,") for natural paragraph flow.
+Hindi-specific text processing: Numbers are converted to Hindi words for better TTS pronunciation (e.g., 60% → साठ प्रतिशथ). The Devanagari punctuation mark । is padded for proper TTS pausing, and common mispronunciation patterns are corrected before synthesis.
+YouTube Publishing Automation
+OAuth2 with automatic token refresh: The upload module handles the full OAuth2 lifecycle — loading cached tokens, refreshing expired credentials, and falling back to browser-based re-authorization when needed. Credentials persist across runs without re-authentication.
+Resumable upload with progress tracking: Large video files (130+ MB) are uploaded using Google's resumable upload protocol with real-time upload percentage logging, ensuring uploads survive transient network interruptions.
+Auto-generated metadata: Video title, description, and tags are dynamically populated with the current date in Hindi format, SEO-optimized keywords, and proper YouTube category classification.
+4. My Role & Ownership
+This is a 100% solo project — architecture, pipeline design, AI integration, deployment, and daily operations.
+
+What I Designed
+The complete headless pipeline architecture: text generation → voice synthesis → audio normalization → word-level alignment → karaoke subtitle rendering → video composition → automated publishing
+The local-first design philosophy: zero cloud dependencies for AI inference, zero recurring API costs, total data sovereignty
+The structured content generation system with categorized phrase pools and anti-repetition logic
+The scheduled unattended production workflow via Windows Task Scheduler
+Problems I Solved
+Orchestrated two large AI models (XTTS v2 for synthesis, Whisper for alignment) in a single pipeline with GPU memory management and automatic CPU fallback
+Built a precise word-level subtitle timing system that reconciles mismatches between synthesized speech and Whisper's transcription output
+Designed an audio normalization pipeline that produces consistent broadcast-ready volume levels from variable TTS output
+Engineered a 4-second audio injection delay synchronized with subtitle start timing for professional-quality video openings
+Decisions I Made
+Structured randomization over LLM text generation: Guaranteed grammatically correct, tonally consistent output with zero inference cost — LLMs would add latency, hallucination risk, and compute overhead for a domain where templated generation produces better results
+XTTS v2 over cloud TTS: Eliminated recurring costs and maintained voice identity consistency without depending on third-party API availability
+ASS over SRT: Chose the subtitle format that supports the karaoke highlighting effect that makes the videos feel professional and polished
+History journaling over database: A simple JSON file tracks used phrases with date-based expiration — the right amount of persistence for a single-machine daily workflow, without the overhead of a database server
+Trade-offs I Handled
+Quality vs. throughput: XTTS v2 produces high-quality cloned speech but is slower than lighter TTS models. The 200-character chunk limit was tuned to balance synthesis stability against processing time — smaller chunks are more reliable but produce more FFmpeg merge operations.
+Whisper accuracy vs. simplicity: Whisper occasionally miscounts words in Hindi text, requiring the alignment engine to handle word-count mismatches. This trade-off was accepted because Whisper eliminates the need for a separate forced-alignment tool and provides verification capability as a bonus.
+Deterministic text vs. generative variety: Structured randomization from phrase pools produces less variety than LLM generation, but guarantees tone consistency, grammatical correctness, and predictable runtime — critical properties for an unattended daily system.
+5. Technical Highlights (LinkedIn Format)
+Pipeline Architecture
+
+Designed a 7-stage headless AI pipeline: Content Generation → Voice Synthesis → Audio Normalization → Word-Level Alignment → Karaoke Subtitle Rendering → Video Composition → Automated YouTube Publishing
+Built for fully unattended daily operation via Windows Task Scheduler — zero human interaction from script generation to published video
+Processes all 12 zodiac signs per run, producing individual rendered segments merged into a single final video (130+ MB)
+AI / ML Engineering
+
+On-device voice cloning via XTTS v2 with GPU acceleration and automatic CUDA/CPU fallback
+Word-level timestamp extraction using OpenAI Whisper with reference-text alignment to handle synthesis-transcription word count mismatches
+Structured content generation from 6 categorized Hindi phrase pools (270+ entries) with logical connectors and anti-repetition history journaling
+Hindi-specific number-to-word conversion and pronunciation correction for TTS optimization
+Audio & Video Engineering
+
+FFmpeg audio normalization pipeline with dynamic audio normalization (dynaudnorm) and 4x gain for broadcast-ready volume
+ASS karaoke subtitle generation with per-word \kf timing, dynamic fade effects, border/shadow/blur styling, and 4-layer timing offset coordination
+1920×1080 H.264 video rendering with AAC 192k audio, delayed audio injection, and lossless concat demuxer for multi-segment merge
+Automation & Operations
+
+OAuth2 YouTube upload with automatic token refresh, resumable upload protocol, and auto-generated date-localized Hindi metadata
+JSON-based history journaling with 10-day rolling window for content diversity enforcement
+Complete lifecycle management: directory setup, temp file cleanup, error handling with per-rashi skip-and-continue resilience
+Technologies
+
+Python, PyTorch, Coqui TTS (XTTS v2), OpenAI Whisper, FFmpeg, YouTube Data API v3, Google OAuth2, Windows Task Scheduler
+6. Impact Framing
+System Design Skills
+Astro demonstrates the ability to decompose a complex media production workflow into a clean multi-stage pipeline where each component (text generation, voice synthesis, audio processing, subtitle alignment, video rendering, publishing) has well-defined inputs, outputs, and failure boundaries. Each rashi segment is processed independently — a failure in one segment doesn't block the remaining eleven.
+
+Production Thinking
+This is not a prototype or a demo. It is a system that runs daily on a schedule, generates real content, and publishes to a live YouTube channel. The history journaling, automatic token refresh, resumable uploads, per-rashi error resilience, and temp file cleanup all reflect production engineering — designing for the day the system fails, not just the day it works.
+
+Cost & Efficiency Engineering
+The local-first architecture eliminates recurring cloud API costs entirely. At daily production volume, cloud TTS pricing (ElevenLabs, Google Cloud TTS) would scale linearly with output. With Astro, once the hardware investment is made, the marginal cost of each additional video is effectively zero — electricity and internet bandwidth only.
+
+AI Engineering Depth
+Running two distinct AI models (speech synthesis + speech recognition) in a coordinated pipeline, managing GPU resources across both, and building a robust word-alignment layer that reconciles their output differences demonstrates applied ML engineering. This is not API consumption — it is on-device model orchestration with domain-specific adaptation (Hindi pronunciation correction, number-to-word conversion, sentence-safe chunking).
+
+Scalability Mindset
+The architecture is inherently parallelizable — each rashi segment is independent and could run concurrently with minimal refactoring. The config-driven design (rashi list, video mapping, timing parameters) means adding new content categories or changing output format requires configuration changes, not code rewrites.
+
+Senior-Level Engineering Judgement
+Every technical decision has a clear rationale grounded in the system's operational constraints: structured randomization over LLMs (correctness > variety for unattended systems), XTTS over cloud TTS (cost elimination + voice consistency), ASS over SRT (karaoke capability), JSON history over database (right-sized persistence), lossless concat over re-encode (speed over flexibility). This is the hallmark of senior engineering — choosing the right tool for the constraint set, not the most impressive one.
+
+7. LinkedIn Post
+I built Astro — a headless AI pipeline that generates fully produced daily horoscope videos and publishes them to YouTube, completely unattended.
+
+The challenge: producing a daily video covering 12 zodiac signs — with natural Hindi narration, word-synced subtitles, and professional rendering — is hours of manual work. Every single day.
+
+Astro does the entire thing autonomously: 📝 Structured script generation from categorized phrase pools with anti-repetition 🎙️ Voice-cloned narration using XTTS v2 — consistent voice identity, zero API cost 📄 Word-level karaoke subtitles synced via OpenAI Whisper timestamps 🎥 1080p video rendering with FFmpeg, audio normalization, and fade effects 📤 OAuth2-authenticated YouTube upload with auto-generated metadata
+
+The system runs daily via Task Scheduler. No human touches it between runs.
+
+Some design decisions I'm particularly intentional about: → Local AI inference over cloud APIs — zero recurring cost at any volume → Structured randomization over LLMs — guaranteed correctness for unattended production → Per-word karaoke timing with 4-layer offset coordination for precise audio-visual sync → Per-rashi error resilience — one failure doesn't block the remaining segments
+
+The entire stack runs on a single local workstation. No servers, no cloud, no data leaving the machine.
+
+Solo project — architecture, AI pipeline, automation, operations.
+
+#AI #Automation #Python #MediaEngineering #MachineLearning
+
+8. Resume Bullets
+Designed and built Astro, a headless AI media automation pipeline (Python, PyTorch, FFmpeg) that generates daily Hindi horoscope videos — voice-cloned narration, word-level karaoke subtitles, and professional 1080p rendering — and publishes to YouTube via OAuth2, fully unattended through Windows Task Scheduler
+
+Engineered a multi-model on-device AI pipeline orchestrating XTTS v2 (voice cloning) and OpenAI Whisper (word-level alignment) with GPU-accelerated inference, audio normalization, and a 4-layer subtitle timing system producing ASS karaoke effects — all running locally with zero cloud dependency
+
+Built a production-grade content automation system with structured randomization across 6 Hindi phrase categories (270+ entries), anti-repetition history journaling, resumable YouTube uploads, per-segment error resilience, and automated lifecycle management — running in active daily production for a live channel

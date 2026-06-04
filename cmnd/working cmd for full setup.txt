@@ -1,0 +1,514 @@
+#!/usr/bin/env python
+import random
+import re
+from pathlib import Path
+import json
+from datetime import datetime, timedelta
+import subprocess
+from TTS.api import TTS
+import whisper
+import sys
+import difflib
+import re 
+from pathlib import Path
+import wave
+import torch
+import shlex 
+
+# === Allow XTTS-related classes to be unpickled safely (PyTorch 2.6+) ===
+from TTS.tts.configs.xtts_config import XttsConfig
+from TTS.tts.models.xtts import XttsAudioConfig, XttsArgs
+from TTS.config.shared_configs import BaseDatasetConfig
+
+torch.serialization.add_safe_globals([
+    XttsConfig,
+    XttsAudioConfig,
+    XttsArgs,
+    BaseDatasetConfig,
+])
+# ================================================================
+
+# ===== CONFIG =====
+# IMPORTANT: These paths are specific to the user's environment and must exist.
+rashifal_file = Path(r"C:\Users\ankyp\Desktop\dataset.txt")
+used_history_file = Path(r"C:\Users\ankyp\Desktop\rashifal_used_history.json")
+output_dir = Path(r"D:\tts\output")
+tmp_dir = output_dir / "tmp"
+tts_text_dir = tmp_dir / "tts_texts"
+speaker_wav = r"D:\tts\input.wav"
+tts_model = "tts_models/multilingual/multi-dataset/xtts_v2"
+
+rashis = [
+    "मेष", "वृषभ", "मिथुन", "कर्क", "सिंह", "कन्या",
+    "तुला", "वृश्चिक", "धनु", "मकर", "कुंभ", "मीन"
+]
+
+
+# --- Subtitle Styling Configuration (CRITICAL SECTION: CHECK LINES 50-54) ---
+# All words will transition from DEFAULT_COLOR to HIGHLIGHT_COLOR (Karaoke Wipe)
+DEFAULT_COLOR = "&H00FFFFFF"  # Primary Color: White (Word before spoken)
+HIGHLIGHT_COLOR = "&H0000FFFF" # Secondary Color: Yellow (Word during/after spoken) - BGR format: 00FFFF is Yellow
+FONT_SIZE = 72
+ANIMATION_DURATION_CS = 3 # 3 centiseconds (30ms) for a sharp word pop-in/scale-up
+# --------------------------------------
+
+
+
+
+# ===== UTILS =====
+def split_text_safe(text, max_len=200):
+    """Splits text into chunks by sentence boundary, ensuring chunks are under max_len."""
+    sentences = re.split(r'(?<=[।.!?])\s*', text)
+    chunks = []
+    current = ""
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        if len(current) + len(s) + 1 <= max_len:
+            current += (" " if current else "") + s
+        else:
+            if current:
+                chunks.append(current.strip())
+            current = s
+    if current:
+        chunks.append(current.strip())
+    unique_chunks = []
+    for c in chunks:
+        if c not in unique_chunks:
+            unique_chunks.append(c)
+    return unique_chunks
+
+num_to_hindi = {
+    5: "पाँच प्रतिशत", 10: "दस प्रतिशत", 15: "पंद्रह प्रतिशत",
+    20: "बीस प्रतिशत", 25: "पच्चीस प्रतिशत", 30: "तीस प्रतिशत",
+    35: "पैंतीस प्रतिशत", 40: "चालीस प्रतिशत", 45: "पैंतालीस प्रतिशत",
+    50: "पचास प्रतिशत", 55: "पचपन प्रतिशत", 60: "साठ प्रतिशत",
+    65: "पैंसठ प्रतिशत", 70: "सत्तर प्रतिशत", 75: "पचहत्तर प्रतिशत",
+    80: "अस्सी प्रतिशत", 85: "पचासी प्रतिशत", 90: "नब्बे प्रतिशत",
+    95: "पंचानबे प्रतिशत", 100: "सौ प्रतिशत"
+}
+
+def convert_number_to_hindi(match):
+    """Converts a matched percentage number to its Hindi word equivalent."""
+    num = int(match.group(1))
+    return num_to_hindi.get(num, match.group(0))
+
+def fix_hindi_pronunciation(txt: str) -> str:
+    """Fixes common pronunciation issues for better TTS quality (e.g., 'प्रतिशत' -> 'प्रतिशथ')."""
+    return txt.replace("प्रतिशत", "प्रतिशथ")
+
+def format_srt_time(seconds: float) -> str:
+    """Formats time in SRT format (HH:MM:SS,mmm)."""
+    total_ms = int(round(seconds * 1000))
+    h = total_ms // 3600000
+    m = (total_ms % 3600000) // 60000
+    s = (total_ms % 60000) // 1000
+    ms = total_ms % 1000
+    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+def format_ass_time(seconds: float) -> str:
+    """Formats time in ASS format (H:MM:SS.cc)."""
+    total_ms = int(seconds * 1000)
+    h = total_ms // 3600000
+    m = (total_ms % 3600000) // 60000
+    s = (total_ms % 60000) // 1000
+    cs = (total_ms % 1000) // 10
+    return f"{h}:{m:02}:{s:02}.{cs:02}"
+
+def get_wav_duration(wav_file: Path) -> float:
+    """Calculates the duration of a WAV file in seconds."""
+    try:
+        with wave.open(str(wav_file), 'rb') as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            return frames / float(rate)
+    except Exception:
+        # Fallback to ffprobe
+        res = subprocess.run([
+            "ffprobe", "-i", str(wav_file),
+            "-show_entries", "format=duration",
+            "-v", "quiet", "-of", "csv=p=0"
+        ], capture_output=True, text=True)
+        try:
+            duration = float(res.stdout.strip())
+            return duration
+        except (ValueError, IndexError):
+             print(f"Warning: Could not get duration for {wav_file} using ffprobe. The file might be corrupted or zero-length.")
+             return 0.0
+
+def clean_tts_output(text: str) -> str:
+    """
+    Cleans up common artifacts from XTTS Hindi generation/tokenization,
+    specifically duplicated characters/matras at the end of words.
+    Example: 'मेषष' -> 'मेष', 'राशिि' -> 'राशि', 'होगा।।' -> 'होगा।'
+    """
+    # Pattern: finds any Devanagari character/punctuation (U+0900 to U+097F) followed immediately by itself.
+    # We replace the sequence with a single instance of the character.
+    cleaned_text = re.sub(r'([\u0900-\u097F])\1+', r'\1', text)
+    
+    # Safety check for duplicated ASCII punctuation
+    cleaned_text = re.sub(r'([.,;!?:])\1+', r'\1', cleaned_text)
+    
+    return cleaned_text
+
+def clean_text_for_timing(text):
+    """
+    1. Removes duplicated characters (TTS output artifact).
+    2. Removes punctuation, leaving Hindi, English, numbers, and space
+    for accurate word counting/split timing.
+    """
+    # 1. Clean duplicated characters
+    text = clean_tts_output(text)
+    # 2. Remove punctuation
+    return re.sub(r"[^ऀ-ॿ0-9A-Za-z\s]", "", text)
+
+# Helper function to run FFmpeg with diagnostics
+def run_ffmpeg_command(cmd, desc):
+    print(f"\n⚙️ Running FFmpeg command for: {desc}")
+    print(f"Command: {' '.join(shlex.quote(c) for c in cmd)}") # Use shlex.quote for safe printing
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        print(f"✅ FFmpeg success: {desc}")
+        # print("Output:", result.stdout) # Uncomment for verbose FFmpeg logging
+        # print("Warnings/Info:", result.stderr)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"\n🚨 FFMPEG ERROR DETAILS for {desc} (Return Code {e.returncode}):")
+        print("---------------------------------------------------------")
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
+        print("---------------------------------------------------------")
+        raise RuntimeError(f"FFmpeg failed during {desc}. See details above.")
+    except FileNotFoundError:
+        print("\n🚨 ERROR: FFmpeg executable not found. Make sure it is installed and added to your system PATH.")
+        raise FileNotFoundError("FFmpeg executable not found.")
+
+# ===== MAIN =====
+def main(test_mode=False):
+    # --- Read & clean dataset
+    try:
+        full_text = rashifal_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(f"Error: Dataset file not found at {rashifal_file}. Please check the path and permissions.")
+        sys.exit(1)
+        
+    clean_text_data = re.sub(r'\[.*?\]', '', full_text).strip()
+    blocks = re.split(r'(?=\b(?:' + '|'.join(rashis) + r')\s*राशि)', clean_text_data)
+    cleaned = []
+    seen = set()
+    for b in blocks:
+        for r in rashis:
+            if r in b and r not in seen:
+                b = re.sub(r'अगर आप मुझसे जुड़.*', '', b, flags=re.DOTALL)
+                b = re.sub(r'\s+', ' ', b).strip()
+                cleaned.append(b)
+                seen.add(r)
+                break
+    
+    if len(cleaned) == 0:
+        print("Error: No horoscope data found after cleaning the dataset file.")
+        sys.exit(1)
+        
+    daily_rashifal = {}
+    for rashi, script in zip(rashis, cleaned):
+        chosen = re.sub(r'\b(5|10|15|20|25|30|35|40|45|50|55|60|65|70|75|80|85|90|95|100)%',
+                        convert_number_to_hindi, script)
+        chosen = fix_hindi_pronunciation(chosen)
+        chosen = re.sub(r'आज', lambda _: random.choice(['आज', 'आज का दिन', 'इस समय']), chosen)
+        daily_rashifal[rashi] = chosen
+
+    # --- Directories
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tts_text_dir.mkdir(exist_ok=True)
+    
+    # Initialize TTS model
+    print(f"Loading TTS model: {tts_model}...")
+    try:
+        tts = TTS(tts_model)
+    except Exception as e:
+        print(f"Error loading TTS model: {e}")
+        print("Please ensure your environment is set up correctly for the Coqui TTS library.")
+        sys.exit(1)
+
+    wav_files = []
+    full_spoken_text_chunks = [] 
+    
+    rashi_list = [rashis[0]] if test_mode else rashis
+
+    for rashi in rashi_list:
+        if rashi not in daily_rashifal:
+            continue
+            
+        text = daily_rashifal[rashi]
+        chunks = split_text_safe(text, max_len=200)
+        
+        if test_mode:
+            chunks = [chunks[0]]  
+            print("⚡ Test mode: generating only the first chunk of the first rashi.")
+        
+        # --- Add chunks to the full script list
+        full_spoken_text_chunks.extend(chunks)
+        
+        temp_files = []
+
+        for i, chunk in enumerate(chunks):
+            out_file = tmp_dir / f"{rashi}_{i}.wav"
+            
+            # --- Save chunk text for reference (was already present, but good to highlight)
+            txt_file = tts_text_dir / f"{rashi}_{i}.txt"
+            txt_file.write_text(chunk, encoding="utf-8")
+            
+            print(f"🔊 Generating TTS for {rashi}, chunk {i+1}/{len(chunks)}...")
+            
+            # NOTE: Check if speaker_wav exists before calling TTS
+            if not Path(speaker_wav).exists():
+                print(f"Error: Speaker WAV file not found at {speaker_wav}.")
+                sys.exit(1)
+                
+            tts.tts_to_file(text=chunk, speaker_wav=speaker_wav, language="hi", file_path=str(out_file))
+            
+            if not out_file.exists() or out_file.stat().st_size == 0:
+                print(f"Warning: TTS output missing or zero-length for {rashi}_{i}. Skipping chunk.")
+                continue
+                
+            temp_files.append(str(out_file))
+
+        # --- Merge chunks per rashi
+        if not temp_files:
+            continue
+            
+        rashi_concat_file = tmp_dir / f"{rashi}_concat.txt"
+        with open(rashi_concat_file, "w", encoding="utf-8") as f:
+            for wav in temp_files:
+                f.write(f"file '{Path(wav).as_posix()}'\n")
+
+        final_rashi_file = tmp_dir / f"{rashi}.wav"
+        
+        cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+            "-i", str(rashi_concat_file),
+            "-af", "volume=4.0,dynaudnorm=f=75",
+            "-c:a", "pcm_s16le", str(final_rashi_file)
+        ]
+        
+        try:
+            run_ffmpeg_command(cmd, f"Rashi Chunk Merge: {rashi}")
+        except Exception:
+            # If rashi merge fails, we skip this rashi and continue (or exit if critical)
+            print(f"❌ Failed to merge chunks for {rashi}. Skipping this rashi.")
+            rashi_concat_file.unlink(missing_ok=True)
+            if test_mode:
+                sys.exit(1) # Exit immediately in test mode
+            continue
+
+        rashi_concat_file.unlink(missing_ok=True)
+
+        if test_mode:
+            final_output = output_dir / "test_rashifal.wav" 
+            
+            # --- FIX: Use replace() to overwrite the existing file safely
+            Path(final_rashi_file).replace(final_output) 
+            
+            print(f"⚡ Test WAV generated: {final_output}")
+            break 
+        else:
+            wav_files.append(str(final_rashi_file))
+            for f in temp_files:
+                Path(f).unlink(missing_ok=True)
+
+    # --- Date setup
+    date_str_format = datetime.today().strftime("%Y_%m_%d")
+    final_output = output_dir / f"{date_str_format}.wav" 
+    
+    # --- Merge all rashis if not test
+    if not test_mode and wav_files:
+        concat_file = tmp_dir / "concat_all.txt"
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for wav in wav_files:
+                f.write(f"file '{Path(wav).as_posix()}'\n") 
+                
+        cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-af", "volume=4.0,dynaudnorm=f=75", "-c:a", "pcm_s16le", str(final_output)
+        ]
+        
+        try:
+            run_ffmpeg_command(cmd, "Final All Rashi Merge")
+        except Exception:
+            print("❌ Critical failure: Final audio merge failed.")
+            sys.exit(1)
+
+        concat_file.unlink(missing_ok=True)
+        for wav in wav_files:
+             Path(wav).unlink(missing_ok=True)
+
+        print(f"🎉 Final Rashifal WAV: {final_output}")
+        
+    elif test_mode:
+         final_output = output_dir / "test_rashifal.wav" 
+        
+    # --- Save Full Cleaned Script (User Request)
+    if full_spoken_text_chunks:
+        full_tts_script = "\n\n".join(full_spoken_text_chunks)
+        script_file = output_dir / f"full_tts_script_{date_str_format}.txt"
+        
+        # Ensure overwrite is allowed for the script file too
+        script_file.write_text(full_tts_script, encoding="utf-8")
+        print(f"📄 Full TTS script saved for reference: {script_file.name}")
+
+
+    # --- Critical Check Point
+    if not final_output.exists() or get_wav_duration(final_output) == 0.0:
+        print("\n\n🚨 CRITICAL ERROR: No final audio file was created or it has zero length. Exiting.")
+        print(f"Please check the FFmpeg error details printed above for clues regarding file locking or path issues with: {final_output}")
+        sys.exit(1)
+
+    # --- Subtitle Generation (Uses word-timing approximation based on the successful full text)
+    SRT_FILE = output_dir / f"{date_str_format}.srt"
+    ASS_FILE = output_dir / f"{date_str_format}.ass"
+    VIDEO_FILE = output_dir / f"{date_str_format}.mp4"
+    
+    tts_text = " ".join(full_spoken_text_chunks)
+    if not tts_text:
+        print("Error: No spoken text was collected for subtitle generation. Exiting.")
+        sys.exit(1)
+        
+    spoken_text_clean = clean_text_for_timing(tts_text)
+    duration = get_wav_duration(final_output)
+    
+    words = spoken_text_clean.split()
+    total_words = len(words)
+    duration_per_word = duration / total_words if total_words > 0 else 0.5 
+    
+    current_time = 0.0
+    segment_list = []
+    split_texts = re.split(r'(?<=[।!?])\s*', tts_text)
+    
+    for sentence in split_texts:
+        sentence = sentence.strip()
+        if not sentence: continue 
+
+        clean_sentence = clean_text_for_timing(sentence)
+        num_words = len(clean_sentence.split())
+        seg_duration = num_words * duration_per_word
+        
+        if current_time + seg_duration > duration:
+            seg_duration = duration - current_time
+            if seg_duration <= 0: break
+            
+        segment_list.append({"start": current_time, "end": current_time + seg_duration, "text": sentence})
+        current_time += seg_duration
+
+    print(f"Subtitles prepared for {len(segment_list)} segments. Total duration: {duration:.2f}s")
+
+
+    # --- Write SRT
+    with open(SRT_FILE, "w", encoding="utf-8-sig") as srtf:
+        for i, seg in enumerate(segment_list, start=1):
+            srtf.write(f"{i}\n{format_srt_time(seg['start'])} --> {format_srt_time(seg['end'])}\n{seg['text']}\n\n")
+    print(f"✅ SRT saved: {SRT_FILE}")
+
+        # --- Write KINETIC ASS SCRIPT
+    with open(ASS_FILE, "w", encoding="utf-8-sig") as f:
+        f.write("[Script Info]\nScriptType: v4.00+\nCollisions: Normal\nPlayResX: 1280\nPlayResY: 720\nTimer: 100.0000\n\n")
+        
+        # Define the Kinetic style: 
+        # Primary Colour (White): The color the word starts as.
+        # Secondary Colour (Yellow): The color the word wipes to (karaoke fill).
+        # Alignment 5: Centered on screen.
+        f.write("[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
+        f.write(f"Style: Kinetic,Noto Sans Devanagari,{FONT_SIZE},{DEFAULT_COLOR},{HIGHLIGHT_COLOR},&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,2,5,0,0,0,1\n\n") 
+        
+        f.write("[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+        
+        for seg in segment_list:
+            sentence_text = seg['text']
+            seg_start = seg['start']
+            seg_end = seg['end']
+            
+            # Use split() which includes spaces/punctuation, then clean for timing
+            words_with_space = re.findall(r'(\s*\S+)', ' ' + sentence_text.strip())
+            
+            # Calculate word duration based on clean, simple word count
+            clean_sentence = clean_text_for_timing(sentence_text)
+            total_clean_words = len(clean_sentence.split())
+            
+            if total_clean_words == 0: continue
+            
+            word_duration_ms = (seg_end - seg_start) * 1000 / total_clean_words
+            current_word_start = seg_start
+            
+            formatted_ass_text = ""
+            
+            for full_word in words_with_space:
+                word_to_check = full_word.strip()
+                word_len_factor = len(clean_text_for_timing(word_to_check).split())
+                
+                if word_len_factor == 0: 
+                    # Preserve space/punctuation outside of words
+                    formatted_ass_text += full_word
+                    continue
+                
+                word_time = word_duration_ms * word_len_factor / 1000.0
+                word_end_time = current_word_start + word_time
+                
+                # Karaoke time in centiseconds (10ms units)
+                word_time_cs = int(word_time * 100)
+                
+                # --- UPDATED ANIMATION LOGIC (V3: SHARP POP-IN) ---
+                # 1. Start fully scaled down (\fscy0\fscx0) and fully transparent (\alpha&HFF&).
+                # 2. Animate to full scale (\fscy100\fscx100) and full opacity (\alpha&H00&) over ANIMATION_DURATION_CS (30ms).
+                # 3. Apply the karaoke fill (\kf) for the full word duration.
+                word_fx = (
+                    r"{\fscy0\fscx0\alpha&HFF&" + 
+                    f"\\t(0, {ANIMATION_DURATION_CS}, \\fscy100\\fscx100)\\t(0, {ANIMATION_DURATION_CS}, \\alpha&H00&)" + 
+                    r"\kf" + str(word_time_cs) + r"}" + word_to_check
+                )
+
+                formatted_ass_text += word_fx + full_word[len(word_to_check):] # Add trailing space/punctuation back
+                current_word_start = word_end_time
+            
+            # The line is centered via Style alignment (5) and positioned at screen center (640, 360).
+            f.write(f"Dialogue: 0,{format_ass_time(seg['start'])},{format_ass_time(seg['end'])},Kinetic,,0,0,0,,{{\an5\pos(640,360)}}{formatted_ass_text.strip()}\n")
+
+    print(f"✅ KINETIC ASS animation script saved: {ASS_FILE}")
+
+
+    # --- Generate MP4 video 
+    print("🎬 Generating test MP4 video with subtitles...")
+    
+    ass_path_str = Path(ASS_FILE).as_posix()
+    # Escaping colons is necessary on Windows if the path contains a drive letter (e.g., C:\)
+    escaped_ass_path = ass_path_str.replace(':', r'\:')
+    subtitles_filter_arg = f"ass='{escaped_ass_path}'" 
+    
+    audio_input_path = str(final_output) 
+    video_output_path = output_dir / f"{date_str_format}.mp4" 
+    duration = get_wav_duration(final_output)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"color=c=black:s=1280x720:d={duration}",
+        "-i", audio_input_path,
+        # Use the ASS filter for the animated subtitles
+        "-vf", subtitles_filter_arg,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", # Essential for compatibility
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        str(video_output_path)
+    ]
+
+    try:
+        run_ffmpeg_command(cmd, "Final MP4 Video Generation")
+        print(f"🎉 Final MP4 video generated: {video_output_path}")
+    except Exception:
+        print("❌ Final MP4 video generation failed. See FFMPEG ERROR DETAILS above.")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    test_mode = "--test" in sys.argv or "-p" in sys.argv
+    main(test_mode=test_mode)

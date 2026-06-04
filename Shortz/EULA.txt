@@ -1,0 +1,24 @@
+END USER LICENSE AGREEMENT (EULA)
+
+1. LICENSE GRANT
+You are granted a non-exclusive, non-transferable license to use this software (“Shortz”).
+
+2. OWNERSHIP
+All rights, title, and interest in the Shortz source code, executable, design, and assets
+remain solely with the developer. This software is proprietary.
+
+3. RESTRICTIONS
+You may not:
+- Reverse engineer, modify, or redistribute the software
+- Resell or sublicense the software
+- Share the software publicly without permission
+
+4. THIRD-PARTY LICENSES
+This software bundles FFmpeg binaries under the LGPL 2.1 license. FFmpeg remains the
+property of its respective copyright holders. FFmpeg is NOT owned or licensed by the
+developer of Shortz.
+
+5. LIABILITY
+This software is provided "as is" without warranty of any kind.
+
+By using this software, you agree to this EULA.

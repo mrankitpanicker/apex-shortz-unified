@@ -1,0 +1,5 @@
+
+
+
+
+ffmpeg -f lavfi -i color=c=black:s=1280x720 -i "D:\tts\output\2025_10_28.wav" -vf "ass='D\:\\tts\\output\\2025_10_28.ass'" -shortest -c:v libx264 -c:a aac -b:a 192k "D:\tts\output\2025_10_28.mp4"
